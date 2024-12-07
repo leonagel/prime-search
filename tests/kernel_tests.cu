@@ -1,6 +1,6 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
-#include "../src/kernels/basic_kernel.cu"
+#include "../src/kernels/basic_kernel.cuh"
 
 // Simple test framework
 #define RUN_TEST(test_func) do { \

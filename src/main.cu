@@ -1,6 +1,6 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
-#include "kernels/basic_kernel.cu"
+#include "kernels/basic_kernel.cuh"
 
 int main() {
     const int N = 1 << 20; // 1M elements
