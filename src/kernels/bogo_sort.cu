@@ -51,85 +51,32 @@ __global__ void bogo_sort(int* data, int size, int* output) {
     if (threadIdx.x == 0) {
         offset = 0;
     }
-    if ((shared_random >> (threadIdx.x / 2 + offset)) % 2 == 1) {
-        if (threadIdx.x % 2 < 2 / 2) {
-            shared_data[threadIdx.x + 2 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
+    int __shared__ swap_length;
+    for (swap_length = 2; swap_length <= 32; swap_length *= 2) {
+        if ((shared_random >> (threadIdx.x / swap_length + offset)) % 2 == 1) {
+            if (threadIdx.x % swap_length < swap_length / 2) {
+                shared_data[threadIdx.x + swap_length / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
+            } else {
+                shared_data[threadIdx.x - swap_length / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
+            }
         } else {
-            shared_data[threadIdx.x - 2 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
+            shared_data[threadIdx.x + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)]; 
         }
-    } else {
-       shared_data[threadIdx.x + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)]; 
+
+        if (threadIdx.x == 0) {
+            offset += 32 / swap_length;
+            parity = !parity;
+        }
+        __syncthreads();
     }
 
-    if (threadIdx.x == 0) {
-        offset += 32 / 2;
+    if (threadIdx.x != 0) {
+        shared_data[threadIdx.x + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity) - 1];
+    } else {
+        shared_data[parity_shift(!parity)] = shared_data[size + parity_shift(parity) - 1]; 
         parity = !parity;
     }
     __syncthreads();
-
-    if ((shared_random >> (threadIdx.x / 4 + offset)) % 2 == 1) {
-        if (threadIdx.x % 4 < 4 / 2) {
-            shared_data[threadIdx.x + 4 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-        } else {
-            shared_data[threadIdx.x - 4 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-        }
-    } else {
-       shared_data[threadIdx.x + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)]; 
-    }
-
-    if (threadIdx.x == 0) {
-        offset += 32 / 4;
-        parity = !parity;
-    }
-    __syncthreads();
-
-    if ((shared_random >> (threadIdx.x / 8 + offset)) % 2 == 1) {
-        if (threadIdx.x % 8 < 8 / 2) {
-            shared_data[threadIdx.x + 8 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-        } else {
-            shared_data[threadIdx.x - 8 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-        }
-    } else {
-       shared_data[threadIdx.x + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)]; 
-    }
-
-    if (threadIdx.x == 0) {
-        offset += 32 / 8;
-        parity = !parity;
-    }
-    __syncthreads();
-
-    if ((shared_random >> (threadIdx.x / 16 + offset)) % 2 == 1) {
-        if (threadIdx.x % 16 < 16 / 2) {
-            shared_data[threadIdx.x + 16 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-        } else {
-            shared_data[threadIdx.x - 16 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-        }
-    } else {
-       shared_data[threadIdx.x + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)]; 
-    }
-
-    if (threadIdx.x == 0) {
-        offset += 32 / 16;
-        parity = !parity;
-    }
-    __syncthreads();
-
-    // if ((shared_random >> (threadIdx.x / 32 + offset)) % 2 == 1) {
-    //     if (threadIdx.x % 32 < 32 / 2) {
-    //         shared_data[threadIdx.x + 32 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-    //     } else {
-    //         shared_data[threadIdx.x - 32 / 2 + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)];
-    //     }
-    // } else {
-    //    shared_data[threadIdx.x + parity_shift(!parity)] = shared_data[threadIdx.x + parity_shift(parity)]; 
-    // }
-
-    // if (threadIdx.x == 0) {
-    //     offset += 32 /32;
-    //     parity = !parity;
-    // }
-    // __syncthreads();
 
     if (threadIdx.x == 0) {
         printf("shared_random binary: ");
@@ -143,8 +90,9 @@ __global__ void bogo_sort(int* data, int size, int* output) {
         }
         printf("\n");
     }
-
     __syncthreads();
+
+    output[threadIdx.x] = shared_data[threadIdx.x + parity_shift(parity)];
     
     // // Check first 16 bits of shared_random matches output pattern
     // if (threadIdx.x == 0) {

@@ -64,7 +64,7 @@ bool test_vector_add() {
 }
 
 bool test_bogo_sort() {
-    const int N = 32; // Test with larger array
+    const int N = 32;
     size_t size = N * sizeof(int);
 
     // Allocate and initialize host memory
@@ -73,9 +73,12 @@ bool test_bogo_sort() {
     
     // Initialize input array
     for (int i = 0; i < N; i++) {
-        h_input[i] = i; // Sequential values
-        h_output[i] = 0; // Initialize output to 0
+        h_input[i] = i;
+        h_output[i] = 0;
     }
+
+    // Expected output array
+    int expected[32] = {8,24,25,27,26,29,28,31,30,23,22,20,21,16,17,18,19,2,3,1,0,6,7,5,4,13,12,15,14,10,11,9};
 
     // Allocate device memory
     int *d_input, *d_output;
@@ -92,10 +95,10 @@ bool test_bogo_sort() {
     // Copy result back to host
     cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost);
 
-    // Verify all elements have been filled with random values
+    // Verify output matches expected array
     bool success = true;
     for (int i = 0; i < N; i++) {
-        if (h_output[i] == 0) { // Check if still has initial value
+        if (h_output[i] != expected[i]) {
             success = false;
             break;
         }
