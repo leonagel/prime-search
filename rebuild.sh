@@ -51,11 +51,11 @@ if [ -f "kernel_tests" ]; then
     check_status "Kernel tests"
 fi
 
-# Run main program if it exists
-if [ -f "bozo_sort" ]; then
-    echo -e "${YELLOW}Running main program...${NC}"
-    ./bozo_sort
-    check_status "Main program execution"
-fi
+# # Run main program if it exists
+# if [ -f "bozo_sort" ]; then
+#     echo -e "${YELLOW}Running main program...${NC}"
+#     ./bozo_sort
+#     check_status "Main program execution"
+# fi
 
 echo -e "${GREEN}Rebuild complete!${NC}"

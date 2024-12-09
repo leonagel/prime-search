@@ -7,11 +7,11 @@ __global__ void vectorAdd(const float* A, const float* B, float* C, int N) {
     }
 }
 
-dim3 KernelManager::calculateGrid(int N, int threadsPerBlock) {
+dim3 KernelManagerVectorAdd::calculateGrid(int N, int threadsPerBlock) {
     return dim3((N + threadsPerBlock - 1) / threadsPerBlock);
 }
 
-float KernelManager::launchKernel(const float* A, const float* B, float* C, int N) {
+float KernelManagerVectorAdd::launchKernel(const float* A, const float* B, float* C, int N) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
