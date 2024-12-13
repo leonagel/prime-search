@@ -64,7 +64,7 @@ bool test_vector_add() {
 }
 
 bool test_bogo_sort() {
-    const int N = 32;
+    int N = 32;
     size_t size = N * sizeof(int);
 
     // Allocate and initialize host memory
@@ -90,7 +90,7 @@ bool test_bogo_sort() {
     cudaMemcpy(d_output, h_output, size, cudaMemcpyHostToDevice);
 
     // Run kernel
-    KernelManagerBogoSort::launchKernel(d_input, N, d_output);
+    KernelManagerBogoSort::launchKernel(d_input, d_output);
 
     // Copy result back to host
     cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost);
