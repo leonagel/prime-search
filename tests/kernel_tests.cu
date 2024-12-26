@@ -1,7 +1,10 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
-#include "../src/kernels/basic_kernel.cuh"
-#include "../src/kernels/bogo_sort.cuh"
+// #include "../src/kernels/basic_kernel.cuh"
+// #include "../src/kernels/bogo_sort.cuh"
+#include "../src/kernels/bogo_sort_matv1.cuh"
+
+#define COMPILE_ALL false
 
 // Simple test framework
 #define RUN_TEST(test_func) do { \
@@ -13,6 +16,7 @@
     } \
 } while(0)
 
+#if COMPILE_ALL
 bool test_vector_add() {
     const int N = 1000;
     size_t size = N * sizeof(float);
@@ -224,8 +228,85 @@ bool test_bogo_sort_3_symbol() {
     return success;
 
 }
+#endif
 
+bool test_bogo_sort_matv1_3_symbol() {
+    int N = 32;
+    size_t size = N * sizeof(int);
+
+    // Allocate and initialize host memory
+    int *h_input = new int[N];
+    int *h_output = new int[N];
+
+    int num_zeroes = 16;
+    
+    // Initialize input array
+    for (int i = 0; i < 32; i++) {
+        h_input[i] = i % 2;  // Alternates between 0 and 1
+        h_output[i] = 0;
+    }
+    // Print input array
+    printf("Input array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", h_input[i]);
+    }
+    printf("\n");
+
+    // Expected output array
+    int expected[32];
+    for (int i = 0; i < 32; i++) {
+        // expected[i] = (i < num_zeroes) ? 0 : 1;
+        
+        expected[i] = (i < 32 - num_zeroes) ? 0 : 1;
+    }
+    // Print expected array
+    printf("Expected array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", expected[i]);
+    }
+    printf("\n");
+
+    // Allocate device memory
+    int *d_input, *d_output;
+    cudaMalloc(&d_input, size);
+    cudaMalloc(&d_output, size);
+
+    // Copy input to device
+    cudaMemcpy(d_input, h_input, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_output, h_output, size, cudaMemcpyHostToDevice);
+
+    // Run kernel
+    KernelManagerBogoSortMatV1::launchKernel(d_input, d_output);
+
+    // Copy result back to host
+    cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost);
+
+    // Print output array
+    printf("Output array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", h_output[i]); 
+    }
+    printf("\n");
+
+    // Verify output matches expected array
+    bool success = true;
+    for (int i = 0; i < N; i++) {
+        if (h_output[i] != expected[i]) {
+            success = false;
+            break;
+        }
+    }
+
+    // Cleanup
+    delete[] h_input;
+    delete[] h_output;
+    cudaFree(d_input);
+    cudaFree(d_output);
+
+    return success;
+
+}
 int main() {
-    RUN_TEST(test_bogo_sort_3_symbol);
+    RUN_TEST(test_bogo_sort_matv1_3_symbol);
     return 0;
 }
