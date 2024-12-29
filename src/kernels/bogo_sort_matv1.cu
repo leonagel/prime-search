@@ -7,19 +7,22 @@
 #include <cuda.h>
 #include <cuda_fp16.h>
 
-#define DEBUG_PERMUTE
-#define DEBUG_PRINT 
+// #define DEBUG_PERMUTE
+// #define DEBUG_PRINT 
 // #define DEBUG_SORT
 #define PERMUTE_MATRIX_WIDTH 16
 #define PERMUTATION_LENGTH 32
 #define PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024 1024
 #define PERMUTATION_VECTORS_32x16_FLAT_LENGTH_512 512
+#define LOWER_ROW 512
+#define NEXT_BLOCK 16
 
 #define OUTER_WIDTH 16
 #define INNER_DIM 16
 #define OUTER_HEIGHT 16
 
 using namespace nvcuda;
+using namespace std;
 
 __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     extern __shared__ __half permutation_matrix[PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024]; // 32x32 array
@@ -39,8 +42,8 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     curand_init(0, threadIdx.x, 0, &random_states[threadIdx.x]);
     __syncthreads();
     
-    // random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
-    // bogo_sort_permutation_gen(temp_permutation, size, random_ints);
+    random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
+    bogo_sort_permutation_gen(temp_permutation, size, random_ints);
 
     for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
         random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
@@ -53,6 +56,7 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
     __syncthreads();
     bogo_sort_basis_gen(permutation_matrix, size, random_ints);
+    __syncthreads();
 
     #ifdef DEBUG_PRINT
     if (threadIdx.x == 0) {
@@ -66,29 +70,54 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
         }
         printf("\n");
     }
-    #endif
     __syncthreads();
-    #ifdef DEBUG_PRINT
-    if (threadIdx.x == 0) {
-        printf("Output data: ");
-        for (int i = 0; i < size; i++) {
-            printf("%d ", data[i]);
-        }
-        printf("\n");
-    }
     #endif
 
-    wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_frag;
-	wmma::fragment<wmma::matrix_b, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::col_major> vec_frag;
-	wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_frag;
+    extern __shared__ long permutations_tried;
+    if (threadIdx.x == 0) {
+        permutations_tried = 0;
+    }
+    __syncthreads();
+    while (permutations_tried < 1000000) {
 
-    wmma::fill_fragment(prod_frag, 0.0f);
+        wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_ne_frag;
+        wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_nw_frag;
+        wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_se_frag;
+        wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_sw_frag;
+        wmma::fragment<wmma::matrix_b, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::col_major> vec_up_frag;
+        wmma::fragment<wmma::matrix_b, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::col_major> vec_down_frag;
+        wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_frag;
 
-    wmma::load_matrix_sync(mat_frag, permutation_matrix, OUTER_HEIGHT);
-    wmma::load_matrix_sync(vec_frag, permutation_matrix, OUTER_HEIGHT);
-    wmma::mma_sync(prod_frag, mat_frag, vec_frag, prod_frag);
+        wmma::load_matrix_sync(vec_up_frag, permutation_vectors, PERMUTATION_LENGTH);
+        wmma::load_matrix_sync(vec_down_frag, permutation_vectors + NEXT_BLOCK, PERMUTATION_LENGTH);
 
-    wmma::store_matrix_sync(permutation_vectors, prod_frag, OUTER_WIDTH, wmma::mem_col_major);
+        wmma::load_matrix_sync(mat_nw_frag, permutation_matrix, PERMUTATION_LENGTH);
+        wmma::load_matrix_sync(mat_ne_frag, permutation_matrix + NEXT_BLOCK, PERMUTATION_LENGTH);
+        wmma::load_matrix_sync(mat_sw_frag, permutation_matrix + LOWER_ROW, PERMUTATION_LENGTH);
+        wmma::load_matrix_sync(mat_se_frag, permutation_matrix + LOWER_ROW + NEXT_BLOCK, PERMUTATION_LENGTH);
+
+        wmma::fill_fragment(prod_frag, 0.0f);
+        wmma::mma_sync(prod_frag, mat_nw_frag, vec_up_frag, prod_frag);
+        wmma::mma_sync(prod_frag, mat_ne_frag, vec_down_frag, prod_frag);
+        wmma::store_matrix_sync(permutation_vectors, prod_frag, PERMUTATION_LENGTH, wmma::mem_col_major);
+
+        wmma::fill_fragment(prod_frag, 0.0f);
+        wmma::mma_sync(prod_frag, mat_sw_frag, vec_up_frag, prod_frag);
+        wmma::mma_sync(prod_frag, mat_se_frag, vec_down_frag, prod_frag);
+        wmma::store_matrix_sync(permutation_vectors + NEXT_BLOCK, prod_frag, PERMUTATION_LENGTH, wmma::mem_col_major);
+
+        if (threadIdx.x == 0) {
+            permutations_tried++;
+        }
+
+        __syncthreads();
+
+        bool is_sorted;
+        for (int i = 0; i < 16; i++) {
+            verify_sort_matv1(permutation_vectors + i * 32, 32, &is_sorted);
+        }
+
+    }
 
     #ifdef DEBUG_PRINT
     if (threadIdx.x == 0) {
@@ -96,14 +125,15 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
         for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
             printf("  Row %2d: ", i);
             for (int j = 0; j < PERMUTATION_LENGTH; j++) {
-                printf("%.1f ", __half2float(permutation_vectors[i * PERMUTATION_LENGTH + j]));
+                printf("%5.1f ", __half2float(permutation_vectors[i * PERMUTATION_LENGTH + j]));
             }
             printf("\n");
         }
         printf("\n");
     }
-    #endif
     __syncthreads();
+    #endif
+    
     #ifdef DEBUG_PRINT
     if (threadIdx.x == 0) {
         printf("Output data: ");
@@ -113,10 +143,13 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
         printf("\n");
     }
     #endif
+
+
+
     return;
 }
 
-__device__ void verify_sort_matv1(int* input, int size, bool* is_sorted) {
+__device__ void verify_sort_matv1(__half* input, int size, bool* is_sorted) {
     __syncthreads();
     if (threadIdx.x == 0) {
         *is_sorted = true;
@@ -464,8 +497,8 @@ float KernelManagerBogoSortMatV1::launchKernel(int* data, int* output) {
     cudaEventRecord(start);
 
     // Launch kernel
-    // bogo_sort_matv1<<<grid, block>>>(data, size, output);
-    bogo_sort_matv1<<<1, block>>>(data, size, output);
+    bogo_sort_matv1<<<grid, block>>>(data, size, output);
+    // bogo_sort_matv1<<<1, block>>>(data, size, output);
 
     // Record stop time
     cudaEventRecord(stop);

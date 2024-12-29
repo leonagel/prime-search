@@ -4,7 +4,7 @@
 
 // Kernel declaration
 __global__ void bogo_sort_matv1(int* data, int size, int* output);
-__device__ void verify_sort_matv1(int* input, int size, bool* is_sorted);
+__device__ void verify_sort_matv1(__half* input, int size, bool* is_sorted);
 __device__ void bogo_sort_basis_gen(half* data, int size, int* random_ints);
 __device__ void bogo_sort_permutation_gen(int* data, int size, int* random_ints);
 
