@@ -5,32 +5,33 @@
 #include <iostream>
 #include <mma.h>
 #include <cuda.h>
+#include <cuda_fp16.h>
 
 #define DEBUG_PERMUTE
 #define DEBUG_PRINT 
-// #define DEBUG_SORT 
+// #define DEBUG_SORT
 #define PERMUTE_MATRIX_WIDTH 16
 #define PERMUTATION_LENGTH 32
 #define PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024 1024
-#define PERMUTATION_ARRAY_32x16_FLAT_LENGTH_512 512
+#define PERMUTATION_VECTORS_32x16_FLAT_LENGTH_512 512
 
-// \begin{courtesy of Zong-Sheng Wang}
-#define M 16
-#define N 16
-#define K 16
-// \end{courtesy of Zong-Sheng Wang}
+#define OUTER_WIDTH 16
+#define INNER_DIM 16
+#define OUTER_HEIGHT 16
+
+using namespace nvcuda;
 
 __global__ void bogo_sort_matv1(int* data, int size, int* output) {
-    extern __shared__ int permutation_matrix[PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024]; // 32x32 array
-    extern __shared__ int permutation_array[PERMUTATION_ARRAY_32x16_FLAT_LENGTH_512];
+    extern __shared__ __half permutation_matrix[PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024]; // 32x32 array
+    extern __shared__ __half permutation_vectors[PERMUTATION_VECTORS_32x16_FLAT_LENGTH_512];
     extern __shared__ int temp_permutation[PERMUTATION_LENGTH];
 
-    #ifdef DEBUG_PERMUTE
-    for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
-        permutation_array[i * PERMUTATION_LENGTH + threadIdx.x] = threadIdx.x;
-    }
-    __syncthreads();
-    #endif
+    // #ifdef DEBUG_PERMUTE
+    // for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
+    //     permutation_vectors[i * PERMUTATION_LENGTH + threadIdx.x] = __float2half(threadIdx.x);
+    // }
+    // __syncthreads();
+    // #endif
     
     // Initialize random states and generate random ints
     extern __shared__ curandStatePhilox4_32_10_t random_states[PERMUTATION_LENGTH];
@@ -41,13 +42,7 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
         random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
         __syncthreads();
-        bogo_sort_permutation_gen(temp_permutation, size, random_ints);
-        __syncthreads();
-        
-        // Each thread copies its value to the right spot in the 512 array
-        if (threadIdx.x < PERMUTATION_LENGTH) {
-            permutation_array[i * PERMUTATION_LENGTH + threadIdx.x] = data[temp_permutation[threadIdx.x]];
-        }
+        bogo_sort_permutation_gen(&permutation_vectors[i * PERMUTATION_LENGTH], size, random_ints);
         __syncthreads();
     }
 
@@ -55,35 +50,49 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     __syncthreads();
     bogo_sort_basis_gen(permutation_matrix, size, random_ints);
 
-    // \begin{courtesy of Zong-Sheng Wang}
-    wmma::fragment<wmma::matrix_a, M, N, K, half, wmma::row_major> a_frag;
-	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::col_major> b_frag;
-	wmma::fragment<wmma::accumulator, M, N, K, float> ab_frag;
-
-    wmma::fill_fragment(ab_frag, 0.0f);
-
-    wmma::load_matrix_sync(a_frag, permutation_matrix, K);
-    wmma::load_matrix_sync(b_frag, permutation_matrix, K);
-    wmma::mma_sync(ab_frag, a_frag, b_frag, ab_frag);
-    // \end{courtesy of Zong-Sheng Wang}
-
     #ifdef DEBUG_PRINT
     if (threadIdx.x == 0) {
-        printf("Permutation array:\n");
+        printf("Permutation vectors:\n");
         for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
             printf("  Row %2d: ", i);
             for (int j = 0; j < PERMUTATION_LENGTH; j++) {
-                printf("%2d ", permutation_array[i * PERMUTATION_LENGTH + j]);
+                printf("%.1f ", __half2float(permutation_vectors[i * PERMUTATION_LENGTH + j]));
             }
             printf("\n");
         }
         printf("\n");
+    }
+    #endif
+    __syncthreads();
+    #ifdef DEBUG_PRINT
+    if (threadIdx.x == 0) {
+        printf("Output data: ");
+        for (int i = 0; i < size; i++) {
+            printf("%d ", data[i]);
+        }
+        printf("\n");
+    }
+    #endif
 
-        printf("Permutation matrix:\n");
-        for (int i = 0; i < PERMUTATION_LENGTH; i++) {
+    wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_frag;
+	wmma::fragment<wmma::matrix_b, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::col_major> vec_frag;
+	wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_frag;
+
+    wmma::fill_fragment(prod_frag, 0.0f);
+
+    wmma::load_matrix_sync(mat_frag, permutation_matrix, OUTER_HEIGHT);
+    wmma::load_matrix_sync(vec_frag, permutation_matrix, OUTER_HEIGHT);
+    wmma::mma_sync(prod_frag, mat_frag, vec_frag, prod_frag);
+
+    wmma::store_matrix_sync(permutation_vectors, prod_frag, OUTER_WIDTH, wmma::mem_col_major);
+
+    #ifdef DEBUG_PRINT
+    if (threadIdx.x == 0) {
+        printf("Permutation vectors:\n");
+        for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
             printf("  Row %2d: ", i);
             for (int j = 0; j < PERMUTATION_LENGTH; j++) {
-                printf("%d ", permutation_matrix[i * PERMUTATION_LENGTH + j]);
+                printf("%.1f ", __half2float(permutation_vectors[i * PERMUTATION_LENGTH + j]));
             }
             printf("\n");
         }
@@ -117,7 +126,7 @@ __device__ void verify_sort_matv1(int* input, int size, bool* is_sorted) {
     __syncthreads();
 }
 
-__device__ void bogo_sort_basis_gen(int* data, int size, int* random_ints) {
+__device__ void bogo_sort_basis_gen(__half* data, int size, int* random_ints) {
     extern __shared__ int sorted_ints[PERMUTATION_LENGTH * 2];
     auto parity_shift = [](int p) { return p ? PERMUTATION_LENGTH : 0;};
     
@@ -248,7 +257,7 @@ __device__ void bogo_sort_basis_gen(int* data, int size, int* random_ints) {
         }
     }
     for (int i = 0; i < PERMUTATION_LENGTH; i++) {
-        data[threadIdx.x * PERMUTATION_LENGTH + i] = (i == final_index) ? 1 : 0;
+        data[threadIdx.x * PERMUTATION_LENGTH + i] = __float2half(i == final_index ? 1.0f : 0.0f);
     }
     __syncthreads();
 
@@ -270,7 +279,7 @@ __device__ void bogo_sort_basis_gen(int* data, int size, int* random_ints) {
     __syncthreads();
 }
 
-__device__ void bogo_sort_permutation_gen(int* data, int size, int* random_ints) {
+__device__ void bogo_sort_permutation_gen(__half* data, int size, int* random_ints) {
     extern __shared__ int sorted_ints[64];
     auto parity_shift = [](int p) { return p ? PERMUTATION_LENGTH : 0;};
     
@@ -400,22 +409,33 @@ __device__ void bogo_sort_permutation_gen(int* data, int size, int* random_ints)
             break;
         }
     }
-    data[threadIdx.x] = my_index;
-    #ifdef DEBUG_SORT
+    
+    // Convert to __half type (1.0 at the permuted position, 0.0 elsewhere)
+    for (int i = 0; i < PERMUTATION_LENGTH; i++) {
+        data[threadIdx.x * PERMUTATION_LENGTH + i] = __float2half(i == my_index ? 1.0f : 0.0f);
+    }
+
+    // #ifdef DEBUG_SORT
     if (threadIdx.x == 0) {
-        printf("Final sorted array: ");
+        printf("Final permutation matrix:\n");
         for (int i = 0; i < PERMUTATION_LENGTH; i++) {
-            printf("%d ", data[i]);
+            printf("  ");
+            for (int j = 0; j < PERMUTATION_LENGTH; j++) {
+                printf("%.1f ", __half2float(data[i * PERMUTATION_LENGTH + j]));
+            }
+            printf("\n");
         }
         printf("\n");
     }
-    #endif
+    // #endif
     __syncthreads();
+
+
 }
 
-dim3 KernelManagerBogoSortMatV1::calculateGrid(int N, int threadsPerBlock) {
-    // return dim3((N + threadsPerBlock - 1) / threadsPerBlock);
-    return dim3(N);
+dim3 KernelManagerBogoSortMatV1::calculateGrid(int n, int threadsPerBlock) {
+    // return dim3((INNER_DIM + threadsPerBlock - 1) / threadsPerBlock);
+    return dim3(n);
 }
 
 float KernelManagerBogoSortMatV1::launchKernel(int* data, int* output) {
