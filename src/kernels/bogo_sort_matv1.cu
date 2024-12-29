@@ -3,18 +3,34 @@
 #include <cuda_runtime.h>
 #include <curand.h>
 #include <iostream>
+#include <mma.h>
+#include <cuda.h>
 
+#define DEBUG_PERMUTE
 #define DEBUG_PRINT 
 // #define DEBUG_SORT 
-const int PERMUTE_MATRIX_WIDTH = 16;
-const int PERMUTATION_LENGTH = 32;
-const int PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024 = 1024;
-const int PERMUTATION_ARRAY_32x16_FLAT_LENGTH_512 = 512;
+#define PERMUTE_MATRIX_WIDTH 16
+#define PERMUTATION_LENGTH 32
+#define PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024 1024
+#define PERMUTATION_ARRAY_32x16_FLAT_LENGTH_512 512
+
+// \begin{courtesy of Zong-Sheng Wang}
+#define M 16
+#define N 16
+#define K 16
+// \end{courtesy of Zong-Sheng Wang}
 
 __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     extern __shared__ int permutation_matrix[PERMUTATION_MATRIX_32x32_FLAT_LENGTH_1024]; // 32x32 array
     extern __shared__ int permutation_array[PERMUTATION_ARRAY_32x16_FLAT_LENGTH_512];
     extern __shared__ int temp_permutation[PERMUTATION_LENGTH];
+
+    #ifdef DEBUG_PERMUTE
+    for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
+        permutation_array[i * PERMUTATION_LENGTH + threadIdx.x] = threadIdx.x;
+    }
+    __syncthreads();
+    #endif
     
     // Initialize random states and generate random ints
     extern __shared__ curandStatePhilox4_32_10_t random_states[PERMUTATION_LENGTH];
@@ -38,6 +54,19 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
     __syncthreads();
     bogo_sort_basis_gen(permutation_matrix, size, random_ints);
+
+    // \begin{courtesy of Zong-Sheng Wang}
+    wmma::fragment<wmma::matrix_a, M, N, K, half, wmma::row_major> a_frag;
+	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::col_major> b_frag;
+	wmma::fragment<wmma::accumulator, M, N, K, float> ab_frag;
+
+    wmma::fill_fragment(ab_frag, 0.0f);
+
+    wmma::load_matrix_sync(a_frag, permutation_matrix, K);
+    wmma::load_matrix_sync(b_frag, permutation_matrix, K);
+    wmma::mma_sync(ab_frag, a_frag, b_frag, ab_frag);
+    // \end{courtesy of Zong-Sheng Wang}
+
     #ifdef DEBUG_PRINT
     if (threadIdx.x == 0) {
         printf("Permutation array:\n");
