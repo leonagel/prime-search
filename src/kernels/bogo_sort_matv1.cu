@@ -26,12 +26,12 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     extern __shared__ __half permutation_vectors[PERMUTATION_VECTORS_32x16_FLAT_LENGTH_512];
     extern __shared__ int temp_permutation[PERMUTATION_LENGTH];
 
-    // #ifdef DEBUG_PERMUTE
-    // for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
-    //     permutation_vectors[i * PERMUTATION_LENGTH + threadIdx.x] = __float2half(threadIdx.x);
-    // }
-    // __syncthreads();
-    // #endif
+    #ifdef DEBUG_PERMUTE
+    for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
+        data[i * PERMUTATION_LENGTH + threadIdx.x] = __float2half(threadIdx.x);
+    }
+    __syncthreads();
+    #endif
     
     // Initialize random states and generate random ints
     extern __shared__ curandStatePhilox4_32_10_t random_states[PERMUTATION_LENGTH];
@@ -39,10 +39,14 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     curand_init(0, threadIdx.x, 0, &random_states[threadIdx.x]);
     __syncthreads();
     
+    // random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
+    // bogo_sort_permutation_gen(temp_permutation, size, random_ints);
+
     for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
         random_ints[threadIdx.x] = curand(&random_states[threadIdx.x]);
         __syncthreads();
-        bogo_sort_permutation_gen(&permutation_vectors[i * PERMUTATION_LENGTH], size, random_ints);
+        bogo_sort_permutation_gen(temp_permutation, size, random_ints);
+        permutation_vectors[i * PERMUTATION_LENGTH + threadIdx.x] = __float2half(data[temp_permutation[threadIdx.x]]);
         __syncthreads();
     }
 
@@ -52,7 +56,7 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
 
     #ifdef DEBUG_PRINT
     if (threadIdx.x == 0) {
-        printf("Permutation vectors:\n");
+        printf("Before Matmul Permutation vectors:\n");
         for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
             printf("  Row %2d: ", i);
             for (int j = 0; j < PERMUTATION_LENGTH; j++) {
@@ -88,7 +92,7 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
 
     #ifdef DEBUG_PRINT
     if (threadIdx.x == 0) {
-        printf("Permutation vectors:\n");
+        printf("After Matmul Permutation vectors:\n");
         for (int i = 0; i < PERMUTE_MATRIX_WIDTH; i++) {
             printf("  Row %2d: ", i);
             for (int j = 0; j < PERMUTATION_LENGTH; j++) {
@@ -279,7 +283,7 @@ __device__ void bogo_sort_basis_gen(__half* data, int size, int* random_ints) {
     __syncthreads();
 }
 
-__device__ void bogo_sort_permutation_gen(__half* data, int size, int* random_ints) {
+__device__ void bogo_sort_permutation_gen(int* data, int size, int* random_ints) {
     extern __shared__ int sorted_ints[64];
     auto parity_shift = [](int p) { return p ? PERMUTATION_LENGTH : 0;};
     
@@ -294,11 +298,9 @@ __device__ void bogo_sort_permutation_gen(__half* data, int size, int* random_in
     }
     #endif
     __syncthreads();
-
     // Copy random ints to sorted_ints initial parity section
     sorted_ints[threadIdx.x] = random_ints[threadIdx.x];
     __syncthreads();
-
     extern __shared__ int step_size;
     extern __shared__ bool parity;
     extern __shared__ int merge_indices[PERMUTATION_LENGTH];
@@ -307,7 +309,6 @@ __device__ void bogo_sort_permutation_gen(__half* data, int size, int* random_in
         parity = false;
     }
     __syncthreads();
-
     while (step_size <= PERMUTATION_LENGTH) {
         if (threadIdx.x % step_size == 0) {
             int left_merge_counter = threadIdx.x;
@@ -316,7 +317,6 @@ __device__ void bogo_sort_permutation_gen(__half* data, int size, int* random_in
             printf("Thread %d: left_merge_counter=%d, right_merge_counter=%d\n", 
                    threadIdx.x, left_merge_counter, right_merge_counter);
             #endif
-
             merge_indices[left_merge_counter] = 0;
             merge_indices[right_merge_counter] = 0;
             int print_thread_idx = 0;
@@ -409,29 +409,19 @@ __device__ void bogo_sort_permutation_gen(__half* data, int size, int* random_in
             break;
         }
     }
-    
-    // Convert to __half type (1.0 at the permuted position, 0.0 elsewhere)
-    for (int i = 0; i < PERMUTATION_LENGTH; i++) {
-        data[threadIdx.x * PERMUTATION_LENGTH + i] = __float2half(i == my_index ? 1.0f : 0.0f);
-    }
-
-    // #ifdef DEBUG_SORT
+    data[threadIdx.x] = my_index;
+    #ifdef DEBUG_SORT
     if (threadIdx.x == 0) {
-        printf("Final permutation matrix:\n");
+        printf("Final sorted array: ");
         for (int i = 0; i < PERMUTATION_LENGTH; i++) {
-            printf("  ");
-            for (int j = 0; j < PERMUTATION_LENGTH; j++) {
-                printf("%.1f ", __half2float(data[i * PERMUTATION_LENGTH + j]));
-            }
-            printf("\n");
+            printf("%d ", data[i]);
         }
         printf("\n");
     }
-    // #endif
+    #endif
     __syncthreads();
-
-
 }
+
 
 dim3 KernelManagerBogoSortMatV1::calculateGrid(int n, int threadsPerBlock) {
     // return dim3((INNER_DIM + threadsPerBlock - 1) / threadsPerBlock);
