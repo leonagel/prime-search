@@ -85,34 +85,46 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     }
     __syncthreads();
 
-    wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_ne_frag;
-    wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_nw_frag;
-    wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_se_frag;
-    wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_sw_frag;
-    wmma::fragment<wmma::matrix_b, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::col_major> vec_up_frag;
-    wmma::fragment<wmma::matrix_b, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::col_major> vec_down_frag;
-    wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_up_frag;
-    wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_down_frag;
+    wmma::fragment<wmma::matrix_a, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::row_major> mat_frag;
+    wmma::fragment<wmma::matrix_b, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half, wmma::col_major> vec_frag;
+    wmma::fragment<wmma::accumulator, OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT, half> prod_frag;
 
-    wmma::load_matrix_sync(vec_up_frag, permutation_vectors, PERMUTATION_LENGTH);
-    wmma::load_matrix_sync(vec_down_frag, permutation_vectors + NEXT_BLOCK, PERMUTATION_LENGTH);
 
-    wmma::load_matrix_sync(mat_nw_frag, permutation_matrix, PERMUTATION_LENGTH);
-    wmma::load_matrix_sync(mat_ne_frag, permutation_matrix + NEXT_BLOCK, PERMUTATION_LENGTH);
-    wmma::load_matrix_sync(mat_sw_frag, permutation_matrix + LOWER_ROW, PERMUTATION_LENGTH);
-    wmma::load_matrix_sync(mat_se_frag, permutation_matrix + LOWER_ROW + NEXT_BLOCK, PERMUTATION_LENGTH);
+    while (permutations_tried < 1000000) {
 
-    while (permutations_tried % 1000000 == 0) {
+        //load vec_up
+        wmma::load_matrix_sync(vec_frag, permutation_vectors, PERMUTATION_LENGTH);
+        //load mat nw
+        wmma::load_matrix_sync(mat_frag, permutation_matrix, PERMUTATION_LENGTH);
+        //prep prod_frag as prod_up
+        wmma::fill_fragment(prod_frag, 0.0f);
+        //mma prod_up, mat_nw, vec_up
+        wmma::mma_sync(prod_frag, mat_frag, vec_frag, prod_frag);
 
-        wmma::fill_fragment(prod_up_frag, 0.0f);
-        wmma::mma_sync(prod_up_frag, mat_nw_frag, vec_up_frag, prod_up_frag);
-        wmma::mma_sync(prod_up_frag, mat_ne_frag, vec_down_frag, prod_up_frag);
-        wmma::store_matrix_sync(permutation_vectors, prod_up_frag, PERMUTATION_LENGTH, wmma::mem_col_major);
+        //load mat ne
+        wmma::load_matrix_sync(mat_frag, permutation_matrix + NEXT_BLOCK, PERMUTATION_LENGTH);
+        //load vec down
+        wmma::load_matrix_sync(vec_frag, permutation_vectors + NEXT_BLOCK, PERMUTATION_LENGTH);
+        //mma prod_up, mat_ne, vec_down
+        wmma::mma_sync(prod_frag, mat_frag, vec_frag, prod_frag);
+        //store prod_up
+        wmma::store_matrix_sync(permutation_vectors, prod_frag, PERMUTATION_LENGTH, wmma::mem_col_major);
 
-        wmma::fill_fragment(prod_down_frag, 0.0f);
-        wmma::mma_sync(prod_down_frag, mat_sw_frag, vec_up_frag, prod_down_frag);
-        wmma::mma_sync(prod_down_frag, mat_se_frag, vec_down_frag, prod_down_frag);
-        wmma::store_matrix_sync(permutation_vectors + NEXT_BLOCK, prod_down_frag, PERMUTATION_LENGTH, wmma::mem_col_major);
+        //reset prod_frag to represent prod_down
+        wmma::fill_fragment(prod_frag, 0.0f);
+        //load mat se
+        wmma::load_matrix_sync(mat_frag, permutation_matrix + LOWER_ROW + NEXT_BLOCK, PERMUTATION_LENGTH);
+        ///mma prod_down, mat_se, vec_down
+        wmma::mma_sync(prod_frag, mat_frag, vec_frag, prod_frag);
+
+        //load vec_up
+        wmma::load_matrix_sync(vec_frag, permutation_vectors, PERMUTATION_LENGTH);
+        //load mat sw
+        wmma::load_matrix_sync(mat_frag, permutation_matrix + LOWER_ROW, PERMUTATION_LENGTH);
+        //mma prod_down, mat_sw, vec_up
+        wmma::mma_sync(prod_frag, mat_frag, vec_frag, prod_frag);
+        //store prod_down
+        wmma::store_matrix_sync(permutation_vectors + NEXT_BLOCK, prod_frag, PERMUTATION_LENGTH, wmma::mem_col_major);
 
         if (threadIdx.x == 0) {
             permutations_tried++;
