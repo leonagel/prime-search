@@ -102,7 +102,7 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     wmma::load_matrix_sync(mat_sw_frag, permutation_matrix + LOWER_ROW, PERMUTATION_LENGTH);
     wmma::load_matrix_sync(mat_se_frag, permutation_matrix + LOWER_ROW + NEXT_BLOCK, PERMUTATION_LENGTH);
 
-    while (permutations_tried % 1000000 == 0) {
+    while (permutations_tried < 1000000) {
 
         wmma::fill_fragment(prod_up_frag, 0.0f);
         wmma::mma_sync(prod_up_frag, mat_nw_frag, vec_up_frag, prod_up_frag);
