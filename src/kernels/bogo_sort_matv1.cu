@@ -31,14 +31,16 @@ using namespace nvcuda;
 using namespace std;
 
 __global__ void bogo_sort_matv1(int* data, int size, int* output) {
-    extern __device__ int done;
+    // extern __device__ int done;
     extern __shared__ int local_done;
     extern __shared__ bool is_sorted;
 
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        done = 0;
+    if (threadIdx.x == 0) {
         local_done = 0;
         is_sorted = false;
+        // if (blockIdx.x == 0) {
+        //     done = 0;
+        // }
     }
     __syncthreads();
 
@@ -133,6 +135,38 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
     __syncthreads();
     if (threadIdx.x == 0) {
         printf("Loading permutation vector fragments...\n");
+        printf("Loading upper permutation vector fragment...\n");
+        printf("  - Fragment type: matrix_b (input matrix B)\n");
+        printf("  - Matrix layout: column-major\n");
+        printf("  - Fragment dimensions: %dx%dx%d (MxNxK)\n", OUTER_WIDTH, INNER_DIM, OUTER_HEIGHT);
+        printf("  - Data type: half precision (FP16)\n");
+        printf("  - Source: permutation_vectors array\n");
+        printf("  - Leading dimension: %d\n", PERMUTATION_LENGTH);
+        printf("  - Loading %d elements starting at index 0\n", PERMUTATION_LENGTH);
+        printf("\nPermutation vectors at load point:\n");
+        printf("Upper vector (first 16 elements):\n");
+        for (int i = 0; i < 16; i++) {
+            printf("%.1f ", __half2float(permutation_vectors[i]));
+            if ((i + 1) % 8 == 0) printf("\n");
+        }
+        printf("\nLower vector (first 16 elements):\n"); 
+        for (int i = 0; i < 16; i++) {
+            printf("%.1f ", __half2float(permutation_vectors[i + NEXT_BLOCK]));
+            if ((i + 1) % 8 == 0) printf("\n");
+        }
+
+        printf("\nFragment contents after loading:\n");
+        printf("vec_up_frag elements:\n");
+        for (int i = 0; i < vec_up_frag.num_elements; i++) {
+            printf("%.1f ", __half2float(vec_up_frag.x[i]));
+            if ((i + 1) % 8 == 0) printf("\n");
+        }
+        printf("\nvec_down_frag elements:\n");
+        for (int i = 0; i < vec_down_frag.num_elements; i++) {
+            printf("%.1f ", __half2float(vec_down_frag.x[i]));
+            if ((i + 1) % 8 == 0) printf("\n");
+        }
+
     }
     wmma::load_matrix_sync(vec_up_frag, permutation_vectors, PERMUTATION_LENGTH);
     if (threadIdx.x == 0) {
@@ -236,7 +270,7 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
                 output[threadIdx.x] = permutation_vectors[i * 32 + threadIdx.x];
                 if (threadIdx.x == 0) {
                     printf("Block %d found sorted array after %ld permutations\n", blockIdx.x, permutations_tried);
-                    atomicCAS(&done, 0, 1);
+                    // atomicCAS(&done, 0, 1);
                 }
                 return;
             }
@@ -244,15 +278,15 @@ __global__ void bogo_sort_matv1(int* data, int size, int* output) {
 
         if (permutations_tried % CHECK_DONE_PERMUTATIONS == 0) {
             if (threadIdx.x == 0) {
-                local_done = atomicAnd(&done, 1);
+                // local_done = atomicAnd(&done, 1);
             }
             __syncthreads();
-            if (local_done) {
-                if (blockIdx.x%100 ==0 && threadIdx.x == 0) {
-                    printf("Block %d: Permutations tried: %d\n", blockIdx.x, permutations_tried);
-                }
-                return;
-            }
+            // if (local_done) {
+            //     if (blockIdx.x%100 ==0 && threadIdx.x == 0) {
+            //         printf("Block %d: Permutations tried: %d\n", blockIdx.x, permutations_tried);
+            //     }
+            //     return;
+            // }
         }
     }
 
