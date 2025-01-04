@@ -4,7 +4,7 @@
 
 // #define DEBUG_PRINT
 
-#define MERSENNE_EXPONENT 607
+#define MERSENNE_EXPONENT 136279841
 
 int main() {
     int N = (MERSENNE_EXPONENT - 1) / 31 + 1;
