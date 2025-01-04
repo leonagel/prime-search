@@ -15,8 +15,12 @@ def get_first_n_primes(n):
     return primes
 
 # Get first n primes
-number_of_primes = 50000
+number_of_primes = 100000
 primes = get_first_n_primes(number_of_primes)
+
+print(primes[-1])
+
+exit()
 
 # Check numbers in range
 start = 10**14 - 10**8 // 10
@@ -56,7 +60,9 @@ print(f"Numbers not divisible by first {number_of_primes} primes: {count}")
 # or ~93% of odd prime candidates. 100,000 primes would likely yield diminishing returns for the search window.
 # There is a power law thing here (i.e., every third number is divisible by 3, so they will filter out quickly)
 
-# Primes indivisible by  1,000 primes (1e10): 6,278,040
-# Primes indivisible by  1,000 primes (1e12): 6,263,921
-# Primes indivisible by 10,000 primes (1e12): 4,810,151
-# Primes indivisible by 50,000 primes (1e12): 3,895,700
+# For search space of 1e8 numbers with ~3.1e6 primes
+# Numbers indivisible by   1,000 primes (1e10): 6,278,040
+# Numbers indivisible by   1,000 primes (1e12): 6,263,921
+# Numbers indivisible by  10,000 primes (1e12): 4,810,151
+# Numbers indivisible by  50,000 primes (1e12): 3,895,700
+# Numbers indivisible by 100,000 primes (1e14): 3,894,570

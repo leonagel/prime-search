@@ -12,15 +12,13 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo")
 # Main executable
 add_executable(prime_search
     src/main.cu
-    # src/kernels/basic_kernel.cu
-    # src/kernels/bogo_sort.cu
     src/kernels/prime_search.cu
+    src/kernels/prune.cu
 )
 
 # Tests executable
 add_executable(kernel_tests
     tests/kernel_tests.cu
-    # src/kernels/basic_kernel.cu
-    # src/kernels/bogo_sort.cu
     src/kernels/prime_search.cu
+    src/kernels/prune.cu
 )
