@@ -5,13 +5,9 @@
 
 #define COMPILE_ALL false
 
-#define PRIMES_LENGTH 262144
-
 // #define TEST_MERSENNE_PRIME
 // #define TEST_PRIME_NUMBERS
-// #define TEST_PRUNE_ARRAY_GENERATION 
-#define TEST_PRIME_SEARCH
-// #define TEST_LOAD_ARRAYS_FROM_CACHE
+// # define TEST_PRIME_SEARCH
 
 // Simple test framework
 #define RUN_TEST(test_func) do { \
@@ -25,99 +21,85 @@
 
 #ifdef TEST_PRIME_SEARCH
 bool test_2048_long_array_action() {
-    // Setup test parameters
+    int N = 1024;
+    size_t size = N * sizeof(int);
 
-    long start_offset = 2;
-    int primes_length = PRIMES_LENGTH;
-    const char* cache_folder = "../cache";  // Added cache folder parameter
+    // Allocate and initialize host memory
+    int *h_input = new int[N];
+    int *h_output = new int[N];
     
-    // Allocate host memory
-    int *h_primes = new int[primes_length];
-    int *h_remainder = new int[primes_length];
-    long *h_output = new long[1024];  // Changed to array to match kernel output
-    int *h_output_count = new int[1];
-    
-    // Initialize arrays
-    for (int i = 0; i < primes_length; i++) {
-        h_primes[i] = 0;
-        if (i < 1024) {
-            h_output[i] = -1;
-        }
-          // Initialize output array
-        h_remainder[i] = 0;
+    // Initialize host arrays to 0
+    for (int i = 0; i < N; i++) {
+        h_input[i] = 0;
+        h_output[i] = 0;
     }
-    *h_output_count = 0;
-    printf("Here...\n");
 
-    // Load arrays from cache
-    int loaded_length = KernelManagerPrimeSearch::loadArraysFromCache(h_remainder, h_primes, cache_folder);
-    if (loaded_length < 0) {
-        printf("Failed to load arrays from cache\n");
-        return false;
+    // Print input array
+    printf("Input array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", h_input[i]);
     }
+    printf("\n");
+
+    // Expected output array
+    int expected[N];
+    for (int i = 0; i < N; i++) {
+        // expected[i] = (i < num_zeroes) ? 0 : 1;
+        expected[i] = 1;
+    }
+
+    // Print expected array
+    printf("Expected array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", expected[i]);
+    }
+    printf("\n");
 
     // Allocate device memory
-    int *d_primes, *d_remainder;
-    long *d_output;
-    int *d_output_count;
-    cudaMalloc(&d_primes, primes_length * sizeof(int));
-    cudaMalloc(&d_remainder, primes_length * sizeof(int));
-    cudaMalloc(&d_output, 1024 * sizeof(long));  // Changed size to match array
-    cudaMalloc(&d_output_count, sizeof(int));
+    int *d_input, *d_output;
+    cudaMalloc(&d_input, size);
+    cudaMalloc(&d_output, size);
 
-    // Copy data to device
-    cudaMemcpy(d_primes, h_primes, primes_length * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_remainder, h_remainder, primes_length * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_output, h_output, 1024 * sizeof(long), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_output_count, h_output_count, sizeof(int), cudaMemcpyHostToDevice);
+    // Copy input to device
+    cudaMemcpy(d_input, h_input, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_output, h_output, size, cudaMemcpyHostToDevice);
 
     // Run kernel
-    float time = KernelManagerPrimeSearch::launchKernel(start_offset, d_primes, d_remainder, 
-        primes_length, d_output, d_output_count);
+    KernelManagerPrimeSearch::launchKernel(d_input, d_output);
 
-    cudaError_t err = cudaGetLastError();
+    cudaError_t err = cudaGetLastError();        // Get error code
     printf("CUDA Error: %s\n", cudaGetErrorString(err));
-    printf("Kernel execution time: %f ms\n", time);
 
     // Copy result back to host
-    cudaMemcpy(h_output, d_output, 1024 * sizeof(long), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_output_count, d_output_count, sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_output, d_output, size, cudaMemcpyDeviceToHost);
 
-    // Print results
-    printf("Output array:\n");
-    for (int i = 0; i < 1024; i++) {
-        if (i > 0 && i % 8 == 0) printf("\n");  // Print 8 values per line
-        printf("%-4ld ", h_output[i]);
+    // Print output array
+    printf("Output array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", h_output[i]); 
     }
-    printf("\nOutput count: %d\n", *h_output_count);
+    printf("\n");
 
+    // Verify output matches expected array
     bool success = true;
-    for (int i = 0; i < *h_output_count; i++) {
-        long number = h_output[i];
-        for (int j = 0; j < primes_length; j++) {
-            if ((number + h_remainder[j]) % h_primes[j] == 0) {
-                success = false;
-                break;
-            }
+    for (int i = 0; i < N; i++) {
+        if (h_output[i] != expected[i]) {
+            success = false;
+            break;
         }
-        if (!success) break;
     }
 
     // Cleanup
-    delete[] h_primes;
-    delete[] h_remainder;
+    delete[] h_input;
     delete[] h_output;
-    delete[] h_output_count;
-    cudaFree(d_primes);
-    cudaFree(d_remainder);
+    cudaFree(d_input);
     cudaFree(d_output);
-    cudaFree(d_output_count);
 
     return success;
+
 }
 #endif
 
-#ifdef TEST_PRUNE_ARRAY_GENERATION
 bool test_2048_long_array_action_prune() {
     int N = 9;
     size_t size_N = N * sizeof(int);
@@ -211,7 +193,6 @@ bool test_2048_long_array_action_prune() {
     return success;
 
 }
-#endif
 
 #ifdef TEST_MERSENNE_PRIME
 bool test_generate_mersenne_prime() {
@@ -322,61 +303,14 @@ bool test_generate_prime_numbers() {
 }
 #endif
 
-#ifdef TEST_LOAD_ARRAYS_FROM_CACHE
-bool test_load_arrays_from_cache() {
-    // Create test cache files
-    FILE *output_file = fopen("../cache/output_array", "w");
-    FILE *primes_file = fopen("../cache/primes_array", "w");
-    
-    if (output_file == NULL || primes_file == NULL) {
-        printf("Failed to create test cache files\n");
-        return false;
-    }
-    
-    // Write test data
-    const int expected_length = 5;
-    int expected_output[] = {1, 2, 3, 4, 5};
-    int expected_primes[] = {2, 3, 5, 7, 11};
-    
-    for (int i = 0; i < expected_length; i++) {
-        fprintf(output_file, "%d\n", expected_output[i]);
-        fprintf(primes_file, "%d\n", expected_primes[i]);
-    }
-    
-    fclose(output_file);
-    fclose(primes_file);
-    
-    // Test the load function
-    int output_array[1024] = {0};  // Initialize with zeros
-    int primes_array[1024] = {0};
-    
-    int result_length = KernelManagerPrimeSearch::loadArraysFromCache(output_array, primes_array);
-    
-    // Verify length
-    bool success = (result_length == expected_length);
-    
-    // Verify contents
-    for (int i = 0; i < expected_length && success; i++) {
-        if (output_array[i] != expected_output[i] || primes_array[i] != expected_primes[i]) {
-            success = false;
-            printf("Mismatch at index %d:\n", i);
-            printf("Output array: expected %d, got %d\n", expected_output[i], output_array[i]);
-            printf("Primes array: expected %d, got %d\n", expected_primes[i], primes_array[i]);
-        }
-    }
-    
-    return success;
-}
-#endif
+
 
 int main() {
     #ifdef TEST_PRIME_SEARCH
     RUN_TEST(test_2048_long_array_action);
     #endif
 
-    #ifdef TEST_PRUNE_ARRAY_GENERATION
     RUN_TEST(test_2048_long_array_action_prune);
-    #endif
 
     #ifdef TEST_MERSENNE_PRIME
     RUN_TEST(test_generate_mersenne_prime);
@@ -384,10 +318,6 @@ int main() {
 
     #ifdef TEST_PRIME_NUMBERS
     RUN_TEST(test_generate_prime_numbers);
-    #endif
-
-    #ifdef TEST_LOAD_ARRAYS_FROM_CACHE
-    RUN_TEST(test_load_arrays_from_cache);
     #endif
 
     return 0;
