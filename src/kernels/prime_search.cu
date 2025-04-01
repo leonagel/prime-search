@@ -13,7 +13,7 @@
 // #define DEBUG_SORT
 // #define DEBUG_RANDOM
 
-#define SIZE 1024
+#define SIZE 256
 #define PRIMES_LENGTH 262144
 #define LARGEST_MERSENNE_EXPONENT 136279841
 
